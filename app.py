@@ -13,7 +13,7 @@ st.caption(
     "Add your background piece-by-piece, let AI polish your experience, and generate a custom-tailored LaTeX resume."
 )
 
-# --- Initialize Session State for Master Data ---
+# --- Initialize Master Data Session State ---
 if "master_data" not in st.session_state:
     st.session_state.master_data = {
         "education": {},
@@ -22,6 +22,35 @@ if "master_data" not in st.session_state:
         "experiences": [],
         "projects": [],
     }
+
+# Initialize widget keys if not present
+for key in ["edu_uni", "edu_degree", "edu_dates", "edu_loc", "cat_skills"]:
+    if key not in st.session_state:
+        st.session_state[key] = ""
+
+
+# --- Event Callback for Instant JSON Restoration ---
+def load_profile_callback():
+    uploaded_file = st.session_state.profile_uploader_key
+    if uploaded_file is not None:
+        try:
+            loaded_data = json.load(uploaded_file)
+            st.session_state.master_data = loaded_data
+
+            # Update input widget keys BEFORE UI draws
+            edu = loaded_data.get("education", {})
+            st.session_state["edu_uni"] = edu.get("university", "")
+            st.session_state["edu_degree"] = edu.get("degree", "")
+            st.session_state["edu_dates"] = edu.get("dates", "")
+            st.session_state["edu_loc"] = edu.get("location", "")
+            st.session_state["cat_skills"] = loaded_data.get(
+                "categorized_skills", ""
+            )
+
+            st.toast("✅ Profile restored successfully!", icon="🎉")
+        except Exception as e:
+            st.error(f"Error restoring profile JSON: {e}")
+
 
 # --- Retrieve API Key ---
 api_key = None
@@ -52,18 +81,13 @@ with st.sidebar:
         use_container_width=True,
     )
 
-    # Import Profile JSON
-    uploaded_json = st.file_uploader(
-        "📤 Restore Profile Backup (.json)", type="json"
+    # Import Profile JSON with callback
+    st.file_uploader(
+        "📤 Restore Profile Backup (.json)",
+        type="json",
+        key="profile_uploader_key",
+        on_change=load_profile_callback,
     )
-    if uploaded_json is not None:
-        try:
-            loaded_data = json.load(uploaded_json)
-            st.session_state.master_data = loaded_data
-            st.success("Profile restored!")
-            st.rerun()
-        except Exception as e:
-            st.error(f"Invalid JSON file: {e}")
 
 client = genai.Client(api_key=api_key) if api_key else None
 
@@ -81,32 +105,30 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 # ==========================================
 with tab1:
     st.header("Education Details")
-    edu = st.session_state.master_data.get("education", {})
 
     col1, col2 = st.columns(2)
     with col1:
         uni = st.text_input(
             "University / Institution",
-            value=edu.get("university", ""),
+            key="edu_uni",
             placeholder="e.g., University of Waterloo",
         )
         degree = st.text_input(
             "Degree / Major",
-            value=edu.get("degree", ""),
+            key="edu_degree",
             placeholder="e.g., B.A.Sc. Nanotechnology Engineering",
         )
     with col2:
         dates = st.text_input(
             "Attendance / Graduation Dates",
-            value=edu.get("dates", ""),
+            key="edu_dates",
             placeholder="e.g., Sep 2025 -- Apr 2030",
         )
         loc = st.text_input(
-            "Location",
-            value=edu.get("location", ""),
-            placeholder="e.g., Waterloo, ON",
+            "Location", key="edu_loc", placeholder="e.g., Waterloo, ON"
         )
 
+    # Keep master_data state synchronized with text inputs
     st.session_state.master_data["education"] = {
         "university": uni,
         "degree": degree,
@@ -115,7 +137,7 @@ with tab1:
     }
 
 # ==========================================
-# TAB 2: SKILLS (Tag Input + Auto-Clearing)
+# TAB 2: SKILLS
 # ==========================================
 with tab2:
     st.header("Master Skills Inventory")
@@ -125,7 +147,7 @@ with tab2:
 
     current_skills = st.session_state.master_data.get("skills_list", [])
 
-    # Skill addition form using st.form for clean state reset
+    # Add skill form with auto-clear
     with st.form(key="add_skill_form", clear_on_submit=True):
         col_input, col_btn = st.columns([4, 1])
         with col_input:
@@ -136,7 +158,9 @@ with tab2:
         with col_btn:
             st.write(" ")
             st.write(" ")
-            submit_skill = st.form_submit_button("➕ Add Skill", use_container_width=True)
+            submit_skill = st.form_submit_button(
+                "➕ Add Skill", use_container_width=True
+            )
 
         if submit_skill and new_skill_input.strip():
             added_items = [
@@ -148,7 +172,7 @@ with tab2:
             st.session_state.master_data["skills_list"] = current_skills
             st.rerun()
 
-    # Display current skill tags
+    # Display skill tags loaded from session state or JSON
     if current_skills:
         st.markdown("**Your Skill Tags:**")
         st.write(", ".join([f"`{s}`" for s in current_skills]))
@@ -169,6 +193,7 @@ Category Name: skill1, skill2, skill3
                         res = client.models.generate_content(
                             model="gemini-2.5-flash", contents=cat_prompt
                         )
+                        st.session_state["cat_skills"] = res.text.strip()
                         st.session_state.master_data["categorized_skills"] = (
                             res.text.strip()
                         )
@@ -178,19 +203,21 @@ Category Name: skill1, skill2, skill3
             if st.button("🗑️ Clear All Skills"):
                 st.session_state.master_data["skills_list"] = []
                 st.session_state.master_data["categorized_skills"] = ""
+                st.session_state["cat_skills"] = ""
                 st.rerun()
 
     st.divider()
+
     cat_skills = st.text_area(
         "Categorized Skills Preview (Used in Final Resume Output)",
-        value=st.session_state.master_data.get("categorized_skills", ""),
+        key="cat_skills",
         height=150,
         help="You can manually tweak the AI-generated categories here if desired.",
     )
     st.session_state.master_data["categorized_skills"] = cat_skills
 
 # ==========================================
-# TAB 3: EXPERIENCE (Add + Auto-Clear + Polish)
+# TAB 3: EXPERIENCE
 # ==========================================
 with tab3:
     st.header("Work & Leadership Experience")
@@ -216,7 +243,7 @@ with tab3:
 
             e_desc = st.text_area(
                 "Raw Notes / Description*",
-                placeholder="Enter rough details of what you did. E.g.: 'I built fast APIs using Python, fixed database bugs, and helped the team build authentication system.'",
+                placeholder="Enter rough details of what you did...",
                 height=120,
             )
 
@@ -293,7 +320,7 @@ Return ONLY the polished bullet points as a bulleted list (starting with '- ').
                 st.rerun()
 
 # ==========================================
-# TAB 4: PROJECTS (Add + Auto-Clear + Polish)
+# TAB 4: PROJECTS
 # ==========================================
 with tab4:
     st.header("Projects Database")
@@ -314,7 +341,7 @@ with tab4:
 
             p_desc = st.text_area(
                 "Raw Project Details*",
-                placeholder="e.g.: 'Made a web app at a hackathon that tracks user health data and gives AI summaries. Won best data viz award.'",
+                placeholder="Enter rough details of what you built...",
                 height=120,
             )
 
